@@ -177,7 +177,7 @@ int run_client(const char *port, bool gso, const char *logfile, const char *cc, 
     // start time
     start_time = client_ctx.now->cb(client_ctx.now);
 
-    int ret = quicly_connect(&conn, &client_ctx, host, sa, NULL, &next_cid, resumption_token, 0, 0);
+    int ret = quicly_connect(&conn, &client_ctx, host, sa, NULL, &next_cid, resumption_token, 0, 0, NULL);
     assert(ret == 0);
     ++next_cid.master_id;
 

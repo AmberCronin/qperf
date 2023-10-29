@@ -108,7 +108,7 @@ static inline void server_handle_packet(quicly_decoded_packet_t *packet, struct 
     quicly_conn_t *conn = find_conn(sa, salen, packet);
     if(conn == NULL) {
         // new conn
-        int ret = quicly_accept(&conn, &server_ctx, 0, sa, packet, NULL, &next_cid, NULL);
+        int ret = quicly_accept(&conn, &server_ctx, 0, sa, packet, NULL, &next_cid, NULL, NULL);
         if(ret != 0) {
             printf("quicly_accept failed with code %i\n", ret);
             return;
