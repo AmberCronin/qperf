@@ -170,7 +170,7 @@ static void server_on_conn_close(quicly_closed_by_remote_t *self, quicly_conn_t 
 static quicly_stream_open_t stream_open = {&server_on_stream_open};
 static quicly_closed_by_remote_t closed_by_remote = {&server_on_conn_close};
 
-int run_server(const char *port, bool gso, const char *logfile, const char *cc, int iw, const char *cert, const char *key)
+int run_server(const char *port, bool gso, const char *logfile, const char *cc, int iw, quicly_ss_type_t *ss, int mw, const char *cert, const char *key)
 {
     setup_session_cache(get_tlsctx());
     quicly_amend_ptls_context(get_tlsctx());
@@ -182,6 +182,7 @@ int run_server(const char *port, bool gso, const char *logfile, const char *cc, 
     server_ctx.transport_params.max_stream_data.uni = UINT32_MAX;
     server_ctx.transport_params.max_stream_data.bidi_local = UINT32_MAX;
     server_ctx.transport_params.max_stream_data.bidi_remote = UINT32_MAX;
+    server_ctx.transport_params.max_data = (mw * 1024 * 1024); // see defaults.h for an explaination of this
     server_ctx.initcwnd_packets = iw;
 
     if(strcmp(cc, "reno") == 0) {
@@ -189,6 +190,8 @@ int run_server(const char *port, bool gso, const char *logfile, const char *cc, 
     } else if(strcmp(cc, "cubic") == 0) {
         server_ctx.init_cc = &quicly_cc_cubic_init;
     }
+    
+    server_ctx.cc_slowstart = ss;
 
     if (gso) {
         enable_gso();
@@ -217,8 +220,8 @@ int run_server(const char *port, bool gso, const char *logfile, const char *cc, 
         setup_log_event(server_ctx.tls, logfile);
     }
 
-    printf("starting server with pid %" PRIu64 ", port %s, cc %s, iw %i\n", get_current_pid(), port, cc, iw);
-
+    printf("starting server with pid %" PRIu64 ", port %s, cc %s, iw %i, ss %s, mw %i\n", get_current_pid(), port, cc, iw, ss->name, mw);
+    
     ev_io socket_watcher;
     ev_io_init(&socket_watcher, &server_read_cb, server_socket, EV_READ);
     ev_io_start(loop, &socket_watcher);
