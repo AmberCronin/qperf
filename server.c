@@ -184,6 +184,7 @@ int run_server(const char *port, bool gso, const char *logfile, const char *cc, 
     server_ctx.transport_params.max_stream_data.bidi_remote = UINT32_MAX;
     server_ctx.transport_params.max_data = (mw * 1024 * 1024); // see defaults.h for an explaination of this
     server_ctx.initcwnd_packets = iw;
+    //server_ctx.enable_ecn = 0;
 
     if(strcmp(cc, "reno") == 0) {
         server_ctx.init_cc = &quicly_cc_reno_init;

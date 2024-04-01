@@ -5,13 +5,19 @@
 #include <ev.h>
 #include <stdbool.h>
 #include <quicly/streambuf.h>
+#include <sys/time.h>
+
+#define THRESH_INC 1000000
 
 static int current_second = 0;
-static uint64_t bytes_received = 0;
-static ev_timer report_timer;
+static uint64_t bytes_received = 0, total_bytes_received = 0, next_thresh = THRESH_INC;
+static ev_timer report_timer, max_data_timer;
 static bool first_receive = true;
 static int runtime_s = 10;
 
+static bool bytes_limit = false, exiting = false;
+static uint64_t max_bytes;
+static uint64_t byte_landmarks[] = {};
 
 void format_size(char *dst, double bytes)
 {
@@ -35,8 +41,27 @@ static void report_cb(EV_P_ ev_timer *w, int revents)
     ++current_second;
     bytes_received = 0;
 
-    if(current_second >= runtime_s) {
+    if(!bytes_limit && (current_second >= runtime_s)) {
         quit_client();
+    }
+}
+
+static void max_data_cb(EV_P_ ev_timer *w, int revents)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    uint64_t milliseconds = (tv.tv_sec) * 1000 + (tv.tv_usec) / 1000;
+
+    if (bytes_limit && (total_bytes_received > max_bytes)) {
+        if (!exiting) {
+            printf("exiting after %lu bytes received\n", total_bytes_received);
+            exiting = true;
+        }
+        quit_client();
+    }
+    if (bytes_limit && (total_bytes_received > next_thresh)) {
+        printf("byteslog: %lu, %lu\n", milliseconds, total_bytes_received);
+        next_thresh += THRESH_INC;
     }
 }
 
@@ -52,6 +77,11 @@ static void client_stream_receive(quicly_stream_t *stream, size_t off, const voi
         first_receive = false;
         ev_timer_init(&report_timer, report_cb, 1.0, 1.0);
         ev_timer_start(ev_default_loop(0), &report_timer);
+        if (bytes_limit) {
+            ev_timer_init(&max_data_timer, max_data_cb, 0.005, 0.005); // time given in seconds, twice
+            ev_timer_start(ev_default_loop(0), &max_data_timer);
+
+        }
         on_first_byte();
     }
 
@@ -60,6 +90,7 @@ static void client_stream_receive(quicly_stream_t *stream, size_t off, const voi
     }
 
     bytes_received += len;
+    total_bytes_received += len;
     quicly_stream_sync_recvbuf(stream, len);
 }
 
@@ -91,4 +122,10 @@ int client_on_stream_open(quicly_stream_open_t *self, quicly_stream_t *stream)
 void client_set_quit_after(int seconds)
 {
     runtime_s = seconds;
+}
+
+void client_set_quit_after_bytes(uint64_t bytes)
+{
+    max_bytes = bytes;
+    bytes_limit = true;
 }

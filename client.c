@@ -119,7 +119,7 @@ static void client_on_conn_close(quicly_closed_by_remote_t *self, quicly_conn_t 
 static quicly_stream_open_t stream_open = {&client_on_stream_open};
 static quicly_closed_by_remote_t closed_by_remote = {&client_on_conn_close};
 
-int run_client(const char *port, bool gso, const char *logfile, const char *cc, int iw, const char *host, int runtime_s, bool ttfb_only)
+int run_client(const char *port, bool gso, const char *logfile, const char *cc, int iw, quicly_ss_type_t *ss, int mw, const char *cmdg, const char *host, int runtime_s, uint64_t max_bytes, bool ttfb_only)
 {
     setup_session_cache(get_tlsctx());
     quicly_amend_ptls_context(get_tlsctx());
@@ -131,12 +131,23 @@ int run_client(const char *port, bool gso, const char *logfile, const char *cc, 
     client_ctx.transport_params.max_stream_data.uni = UINT32_MAX;
     client_ctx.transport_params.max_stream_data.bidi_local = UINT32_MAX;
     client_ctx.transport_params.max_stream_data.bidi_remote = UINT32_MAX;
+    client_ctx.transport_params.max_data = (mw * 1024 * 1024); 
     client_ctx.initcwnd_packets = iw;
+
+    client_ctx.cc_slowstart = ss;
 
     if(strcmp(cc, "reno") == 0) {
         client_ctx.init_cc = &quicly_cc_reno_init;
     } else if(strcmp(cc, "cubic") == 0) {
         client_ctx.init_cc = &quicly_cc_cubic_init;
+    }
+
+    if(strcmp(cmdg, "none") == 0) {
+        client_ctx.growth_mode = QUICLY_MAX_DATA_GROWTH_NONE;
+        printf("cmdg mode is none\n");
+    } else if(strcmp(cmdg, "hybla") == 0) {
+        client_ctx.growth_mode = QUICLY_MAX_DATA_GROWTH_HYBLA;
+        printf("cmdg mode is hybla\n");
     }
 
     if (gso) {
@@ -199,7 +210,12 @@ int run_client(const char *port, bool gso, const char *logfile, const char *cc, 
     ev_init(&client_timeout, &client_timeout_cb);
     client_refresh_timeout();
 
-    client_set_quit_after(runtime_s);
+    if (max_bytes == 0) {
+        client_set_quit_after(runtime_s);
+    }
+    else {
+        client_set_quit_after_bytes(max_bytes);
+    }
 
     ev_run(loop, 0);
     return 0;

@@ -5,6 +5,7 @@
 #include <quicly.h>
 #include <quicly/defaults.h>
 
+// #include "quicly/ss.h"
 #include "server.h"
 #include "client.h"
 
@@ -16,7 +17,9 @@ static void usage(const char *cmd)
             "Options:\n"
             "  -c target                run as client and connect to target server\n"
             "  --cc [reno,cubic]        congestion control algorithm to use (default reno)\n"
-            "  --ss [rfc2001,hybla]     slow start algorithm to use (default rfc2001)\n"
+            "  --ss [rfc2001,search10,search10interp,search10delv,hybla]\n"
+            "                           slow start algorithm to use (default rfc2001)\n"
+            "  --cmdg [none,hybla]      client-side max data growth scaling (default none)\n"
             "  -e                       measure time for connection establishment and first byte only\n"
             "  -g                       enable UDP generic segmentation offload\n"
             "  --iw initial-window      initial window to use (default 10)\n"
@@ -25,6 +28,8 @@ static void usage(const char *cmd)
             "  -p                       port to listen on/connect to (default 18080)\n"
             "  -s                       run as server\n"
             "  -t time (s)              run for X seconds (default 10s)\n"
+            "  -n byte-count[kMG]       request N bytes from the server\n"
+            "  --searchexit [0,1]       enable SEARCH to exit slow-start before loss\n"
             "  -h                       print this help\n"
             "\n",
            cmd);
@@ -36,8 +41,12 @@ static struct option long_options[] =
     {"iw", required_argument, NULL, 1},
     {"ss", required_argument, NULL, 2},
     {"mw", required_argument, NULL, 3},
+    {"cmdg", required_argument, NULL, 4},
+    {"searchexit", required_argument, NULL, 5},
     {NULL, 0, NULL, 0}
 };
+
+extern bool search_exit;
 
 int main(int argc, char** argv)
 {
@@ -45,16 +54,19 @@ int main(int argc, char** argv)
     bool server_mode = false;
     const char *host = NULL;
     int runtime_s = 10;
+    uint64_t max_bytes = 0;
+    char scale = 0;
     int ch;
     bool ttfb_only = false;
     bool gso = false;
     const char *logfile = NULL;
     const char *cc = "reno";
+    const char *cmdg = "none";
     int iw = 10;
     quicly_ss_type_t* ss = &quicly_default_ss;
     int mw = 16; // in megabytes
 
-    while ((ch = getopt_long(argc, argv, "c:egl:p:st:h", long_options, NULL)) != -1) {
+    while ((ch = getopt_long(argc, argv, "c:egl:p:st:n:h", long_options, NULL)) != -1) {
         switch (ch) {
         case 0:
             if(strcmp(optarg, "reno") != 0 && strcmp(optarg, "cubic") != 0) {
@@ -72,9 +84,11 @@ int main(int argc, char** argv)
             break;
         case 2: {
             quicly_ss_type_t **ss_iter;
-            for (ss_iter = quicly_ss_all_types; *ss_iter != NULL; ++ss_iter)
+            for (ss_iter = quicly_ss_all_types; *ss_iter != NULL; ++ss_iter) {
+                printf("checking %s\n",(*ss_iter)->name);
                 if (strcmp((*ss_iter)->name, optarg) == 0)
                     break;
+            }
             if (*ss_iter != NULL) {
                 ss = (*ss_iter);
             } else {
@@ -86,6 +100,25 @@ int main(int argc, char** argv)
             mw = (intptr_t)optarg;
             if (sscanf(optarg, "%" SCNu32, &mw) != 1) {
                 fprintf(stderr, "invalid argument passed to --mw\n");
+                exit(1);
+            }
+            break;
+        case 4:
+            if(strcmp(optarg, "none") != 0 && strcmp(optarg, "hybla") != 0) {
+                fprintf(stderr, "invalid argument passed to --cmdg\n");
+                exit(1);
+            }
+            cmdg = optarg;
+            break;
+        case 5:
+            if (strcmp(optarg, "0") == 0) {
+                search_exit = false;
+            }
+            else if (strcmp(optarg, "1") == 0) {
+                search_exit = true;
+            }
+            else {
+                fprintf(stderr, "invalid argument passed to --searchexit\n");
                 exit(1);
             }
             break;
@@ -123,6 +156,31 @@ int main(int argc, char** argv)
                 exit(1);
             }
             break;
+        case 'n': {
+                uint32_t _max_bytes;
+                if(sscanf(optarg, "%u%c", &_max_bytes, &scale) < 1) {
+                    fprintf(stderr, "invalid argument passed to -n: improper size format\n");
+                    exit(1);
+                }
+                if (scale == 0) {
+                    max_bytes = _max_bytes;
+                }
+                else if (scale == 'k') {
+                    max_bytes = ((uint64_t)_max_bytes) * 1000;
+                }
+                else if (scale == 'M') {
+                    max_bytes = ((uint64_t)_max_bytes) * 1000000;
+                }
+                else if (scale == 'G') {
+                    max_bytes = ((uint64_t)_max_bytes) * 1000000000;
+                }
+                else {
+                    fprintf(stderr, "invalid argument passed to -n: size multiplier must be one of [kMG]\n");
+                    exit(1);
+                }
+                printf("setting data count to %lu\n", max_bytes);
+            }
+            break;
         default:
             usage(argv[0]);
             exit(1);
@@ -143,5 +201,5 @@ int main(int argc, char** argv)
     sprintf(port_char, "%d", port);
     return server_mode ?
                 run_server(port_char, gso, logfile, cc, iw, ss, mw, "server.crt", "server.key") :
-                run_client(port_char, gso, logfile, cc, iw, host, runtime_s, ttfb_only);
+                run_client(port_char, gso, logfile, cc, iw, ss, mw, cmdg, host, runtime_s, max_bytes, ttfb_only);
 }
